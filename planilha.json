@@ -1,0 +1,7 @@
+{
+  "assignments": [
+    { "company_id": 603, "task_key": "FOLHA_PAGAMENTO" },
+    { "company_id": 609, "task_key": "DCTF" },
+    { "company_id": 23,  "task_key": "FOLHA_ADIANTAMENTO" }
+  ]
+}
