@@ -682,22 +682,30 @@ def search_and_select_company(
             logger.info("    query '%s' → 0 results", query)
             continue
 
-        # Try selecting the first result directly
-        first_row, first_text = candidates[0]
-        if try_select_checkbox(driver, first_row):
-            logger.info("    Selected first result (checkbox): '%s'", first_text)
-            return True
+        # Single candidate → accept if fuzzy score is reasonable
+        if len(candidates) == 1:
+            row, text = candidates[0]
+            norm = strip_accents(text).lower()
+            score = difflib.SequenceMatcher(None, target_norm, norm).ratio()
+            logger.debug("    Single result '%s' score=%.2f", text, score)
+            if score >= CFG.fuzzy_threshold:
+                if try_select_checkbox(driver, row):
+                    logger.info("    Selected single result (checkbox): '%s'", text)
+                else:
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView(true);", row
+                    )
+                    _safe_click(driver, row)
+                    logger.info("    Selected single result (click): '%s'", text)
+                save_screenshot(
+                    driver,
+                    f"client_{task_key}_{company[:30]}_clicked",
+                )
+                return True
+            logger.info("    Single result '%s' below threshold (%.2f)", text, score)
+            continue
 
-        # Try clicking the first row
-        try:
-            driver.execute_script("arguments[0].scrollIntoView(true);", first_row)
-            _safe_click(driver, first_row)
-            logger.info("    Selected first result (click): '%s'", first_text)
-            return True
-        except Exception as exc:
-            logger.debug("    First-row click failed: %r", exc)
-
-        # Fuzzy matching fallback
+        # Multiple candidates → use fuzzy matching to pick the best one
         if _select_best_match(driver, candidates, target_norm):
             save_screenshot(
                 driver,
@@ -717,51 +725,57 @@ def process_task_companies(
     task: dict,
     task_map: dict,
 ) -> None:
-    """For a given task, open the Clientes tab, search and select each company."""
+    """For a given task, open the Clientes tab, search and select each company.
+
+    Always navigates back to the task list before returning so that the next
+    loop iteration starts on the correct page.
+    """
     task_key = task.get("key", "unknown")
     companies = task_map.get(task_key, [])
 
-    if not companies:
-        logger.info("  No companies mapped for task '%s'.", task_key)
-        return
+    try:
+        if not companies:
+            logger.info("  No companies mapped for task '%s'.", task_key)
+            return
 
-    if not open_clients_tab(driver, wait):
-        return
+        if not open_clients_tab(driver, wait):
+            return
 
-    clients_input = _find_search_input(driver, CLIENT_SEARCH_INPUT_SELECTORS)
-    if not clients_input:
-        logger.error("  Client search input not found.")
-        return
+        clients_input = _find_search_input(driver, CLIENT_SEARCH_INPUT_SELECTORS)
+        if not clients_input:
+            logger.error("  Client search input not found.")
+            return
 
-    selected_any = False
-    for company in companies:
-        logger.info("  Searching company: %s", company)
-        try:
-            if search_and_select_company(
-                driver, clients_input, company, task_map, task_key
-            ):
-                selected_any = True
-
-            # Re-acquire the input (DOM may have changed)
-            refreshed = _find_search_input(driver, CLIENT_SEARCH_INPUT_SELECTORS)
-            if refreshed:
-                clients_input = refreshed
-        except (StaleElementReferenceException, Exception) as exc:
-            logger.warning("  Error searching company '%s': %r", company, exc)
+        selected_any = False
+        for company in companies:
+            logger.info("  Searching company: %s", company)
             try:
-                _clear_and_type(driver, clients_input, "")
-            except Exception:
-                pass
-            time.sleep(CFG.ui_settle_delay)
+                if search_and_select_company(
+                    driver, clients_input, company, task_map, task_key
+                ):
+                    selected_any = True
 
-    # Click "Adicionar" if at least one company was selected
-    if selected_any:
-        if find_and_click(wait, driver, ADD_BTN_SELECTORS):
-            logger.info("  Clicked 'Adicionar' for task '%s'.", task_key)
-            time.sleep(1.2)
-            _go_back_to_task_list(driver)
-        else:
-            logger.warning("  'Adicionar' button not found for task '%s'.", task_key)
+                # Re-acquire the input (DOM may have changed)
+                refreshed = _find_search_input(driver, CLIENT_SEARCH_INPUT_SELECTORS)
+                if refreshed:
+                    clients_input = refreshed
+            except (StaleElementReferenceException, Exception) as exc:
+                logger.warning("  Error searching company '%s': %r", company, exc)
+                try:
+                    _clear_and_type(driver, clients_input, "")
+                except Exception:
+                    pass
+                time.sleep(CFG.ui_settle_delay)
+
+        # Click "Adicionar" if at least one company was selected
+        if selected_any:
+            if find_and_click(wait, driver, ADD_BTN_SELECTORS):
+                logger.info("  Clicked 'Adicionar' for task '%s'.", task_key)
+                time.sleep(1.2)
+            else:
+                logger.warning("  'Adicionar' button not found for task '%s'.", task_key)
+    finally:
+        _go_back_to_task_list(driver)
 
 
 def _go_back_to_task_list(driver: WebDriver) -> None:
