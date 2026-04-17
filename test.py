@@ -728,10 +728,15 @@ def process_task_companies(
     """For a given task, open the Clientes tab, search and select each company.
 
     Always navigates back to the task list before returning so that the next
-    loop iteration starts on the correct page.
+    loop iteration starts on the correct page.  The number of browser-back
+    steps is tracked so we don't overshoot when no Clientes navigation occurred.
     """
     task_key = task.get("key", "unknown")
     companies = task_map.get(task_key, [])
+    # Track how many pages deep we navigate beyond the task detail page.
+    # search_and_click_task already put us 1 page deep (task detail).
+    # open_clients_tab adds 1 more (Clientes sub-page).
+    nav_depth = 1  # task detail page (always need at least 1 back)
 
     try:
         if not companies:
@@ -740,6 +745,8 @@ def process_task_companies(
 
         if not open_clients_tab(driver, wait):
             return
+
+        nav_depth = 2  # Clientes tab was opened → need 2 backs
 
         clients_input = _find_search_input(driver, CLIENT_SEARCH_INPUT_SELECTORS)
         if not clients_input:
@@ -775,12 +782,12 @@ def process_task_companies(
             else:
                 logger.warning("  'Adicionar' button not found for task '%s'.", task_key)
     finally:
-        _go_back_to_task_list(driver)
+        _go_back_to_task_list(driver, steps=nav_depth)
 
 
-def _go_back_to_task_list(driver: WebDriver) -> None:
-    """Navigate back to the task list (two browser-back actions)."""
-    for _ in range(2):
+def _go_back_to_task_list(driver: WebDriver, steps: int = 2) -> None:
+    """Navigate back to the task list (*steps* browser-back actions)."""
+    for _ in range(steps):
         try:
             driver.back()
             WebDriverWait(driver, CFG.short_wait).until(
