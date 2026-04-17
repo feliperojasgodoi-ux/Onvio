@@ -768,10 +768,14 @@ def process_task_companies(
                     clients_input = refreshed
             except (StaleElementReferenceException, Exception) as exc:
                 logger.warning("  Error searching company '%s': %r", company, exc)
-                try:
-                    _clear_and_type(driver, clients_input, "")
-                except Exception:
-                    pass
+                # Re-acquire the input so subsequent iterations don't fail
+                refreshed = _find_search_input(driver, CLIENT_SEARCH_INPUT_SELECTORS)
+                if refreshed:
+                    clients_input = refreshed
+                    try:
+                        _clear_and_type(driver, clients_input, "")
+                    except Exception:
+                        pass
                 time.sleep(CFG.ui_settle_delay)
 
         # Click "Adicionar" if at least one company was selected
